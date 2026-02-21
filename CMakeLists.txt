@@ -17,7 +17,7 @@ FetchContent_MakeAvailable(lingebra)
 
 add_executable(train
     src/main.cpp 
-    src/network.cpp
+    src/linear_layer.cpp
 )
 
 # 5. Link them together
