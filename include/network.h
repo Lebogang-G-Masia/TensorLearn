@@ -34,6 +34,36 @@ namespace TensorLearn {
                 return params;
             }
     };
+
+    class nn : public Module {
+        public:
+            std::vector<Layer> layers {};
+            nn(std::size_t input_features, const std::vector<std::size_t>& output_features) {
+                std::vector<std::size_t> sizes = {input_features};
+                sizes.insert(sizes.end(), output_features.begin(), output_features.end());
+
+                for (std::size_t i = 0; i < output_features.size(); i++) {
+                    bool last = (i == output_features.size() - 1);
+                    layers.push_back(Layer(sizes[i], sizes[i+1], !last));
+                }
+            }
+
+            std::vector<ut_f32::Ptr> operator()(std::vector<ut_f32::Ptr> x) {
+                for (std::size_t i = 0; i < layers.size(); i++) {
+                    x = layers[i](x);
+                }
+                return x;
+            }
+
+            std::vector<ut_f32::Ptr> parameters() const override {
+                std::vector<ut_f32::Ptr> params {};
+                for (std::size_t i = 0; i < layers.size(); i++) {
+                    std::vector<ut_f32::Ptr> l_params = layers[i].parameters();
+                    params.insert(params.end(), l_params.begin(), l_params.end());
+                }
+                return params;
+            }
+    };
 }
 
 #endif // TENSOR_LEARN_LAYER_H
