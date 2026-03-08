@@ -19,7 +19,7 @@ namespace TensorLearn {
                 std::vector<ut_f32::Ptr> output {};
                 output.reserve(x.size());
 
-                for (std::size_t i = 0; i < x.size(); i++) {
+                for (std::size_t i = 0; i < neurons.size(); i++) {
                     output.push_back(neurons[i](x));
                 }
                 return output;

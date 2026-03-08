@@ -1,6 +1,7 @@
 #include "unit.h"
 #include <vector>
 #include <random>
+#include <stdexcept>
 
 #ifndef TENSOR_LEARN_NEURON_H
 #define TENSOR_LEARN_NEURON_H
@@ -40,6 +41,7 @@ namespace TensorLearn {
     
             ut_f32::Ptr operator()(const std::vector<ut_f32::Ptr>& x) {
                 ut_f32::Ptr act = b;
+                if (x.size() != w.size()) throw std::runtime_error("INPUT FEATURES SHOUDL BE EQUAL TO WEIGHTS");
     
                 for (std::size_t i = 0; i < w.size(); i++) {
                     act = act + (w[i] * x[i]);
