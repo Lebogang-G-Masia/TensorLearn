@@ -46,8 +46,7 @@ namespace TensorLearn {
                 for (std::size_t i = 0; i < w.size(); i++) {
                     act = act + (w[i] * x[i]);
                 }
-                if (nonLinear) return relu(act);
-                return act;
+                return (nonLinear) ? relu(act) : act;
             }
     
             std::vector<ut_f32::Ptr> parameters() const override {
