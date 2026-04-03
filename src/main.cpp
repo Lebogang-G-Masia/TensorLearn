@@ -5,59 +5,59 @@
 using namespace TensorLearn;
 
 int main() {
-    // 4 samples for XOR gate (Non-linearly separable)
-    std::vector<tensor::Ptr> X = {
-        tensor::make(mat_f32({{0.0f}, {0.0f}})),
-        tensor::make(mat_f32({{0.0f}, {1.0f}})),
-        tensor::make(mat_f32({{1.0f}, {0.0f}})),
-        tensor::make(mat_f32({{1.0f}, {1.0f}}))
-    };
-    std::vector<tensor::Ptr> Y = {
-        tensor::make(mat_f32({{0.0f}})),
-        tensor::make(mat_f32({{1.0f}})),
-        tensor::make(mat_f32({{1.0f}})),
-        tensor::make(mat_f32({{0.0f}}))
-    };
+    // Mini-batch XOR: 4 samples in one batch
+    // Shape: (input_features=2, batch_size=4)
+    mat_f32 batch_x({
+        {0.0f, 0.0f, 1.0f, 1.0f},
+        {0.0f, 1.0f, 0.0f, 1.0f}
+    });
+    
+    // Shape: (output_features=1, batch_size=4)
+    mat_f32 batch_y({
+        {0.0f, 1.0f, 1.0f, 0.0f}
+    });
 
-    // XOR requires at least one hidden layer with non-linearity
-    Layer hidden(2, 8, true); // 2 in, 8 out, relu=true
-    Layer output(8, 1);       // 8 in, 1 out
+    tensor::Ptr X = tensor::make(batch_x);
+    tensor::Ptr Y = tensor::make(batch_y);
+
+    Layer hidden(2, 8, true);
+    Layer output(8, 1);
 
     Network network({hidden, output});
-    SGD optimizer(0.05f); // Increased learning rate for XOR
+    SGD optimizer(0.1f); // Using a slightly higher learning rate for batch
 
-    std::size_t epochs = 5000; // XOR can be harder to converge
+    std::size_t epochs = 5000;
     for (std::size_t i = 0; i < epochs; i++) {
-        float epoch_loss = 0.0f;
-        for (std::size_t j = 0; j < X.size(); j++) {
-            // Forward
-            auto outputs = network({X[j]});
-            tensor::Ptr pred = outputs[0];
-            
-            // Loss
-            tensor::Ptr loss = mse_loss(pred, Y[j]);
-            epoch_loss += loss->data(0, 0);
+        // Forward (Network currently takes vector of pointers, let's adapt)
+        // We can just call output(hidden(X)) directly or wrap X in a vector
+        auto outputs = network({X});
+        tensor::Ptr pred = outputs[0];
+        
+        // Loss
+        tensor::Ptr loss = mse_loss(pred, Y);
 
-            // Backward
-            network.zero_grad();
-            backward(loss);
+        // Backward
+        network.zero_grad();
+        backward(loss);
 
-            // Update
-            optimizer.step(network.parameters());
-        }
+        // Update
+        optimizer.step(network.parameters());
+
         if (i % 500 == 0) {
-            std::cout << "Epoch " << i << " Loss: " << epoch_loss / X.size() << std::endl;
+            std::cout << "Epoch " << i << " Loss: " << loss->data(0, 0) << std::endl;
         }
     }
 
     // Test
-    std::cout << "\nTesting Trained XOR Network:" << std::endl;
-    auto final_outputs = network(X);
-    for (std::size_t j = 0; j < X.size(); j++) {
-        std::cout << "Input: [" << X[j]->data(0,0) << ", " << X[j]->data(1,0) << "] "
-                  << "Pred: " << (final_outputs[j]->data(0,0) > 0.5 ? 1 : 0) 
-                  << " (Raw: " << final_outputs[j]->data(0,0) << ") "
-                  << "Target: " << Y[j]->data(0,0) << std::endl;
+    std::cout << "\nTesting Trained XOR Network (Batch):" << std::endl;
+    auto final_outputs = network({X});
+    tensor::Ptr final_pred = final_outputs[0];
+    
+    for (std::size_t j = 0; j < 4; j++) {
+        std::cout << "Input: [" << X->data(0, j) << ", " << X->data(1, j) << "] "
+                  << "Pred: " << (final_pred->data(0, j) > 0.5 ? 1 : 0) 
+                  << " (Raw: " << final_pred->data(0, j) << ") "
+                  << "Target: " << Y->data(0, j) << std::endl;
     }
 
     return 0;

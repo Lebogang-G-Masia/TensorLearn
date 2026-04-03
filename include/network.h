@@ -27,6 +27,78 @@ namespace TensorLearn {
         return out;
     }
 
+    inline tensor::Ptr element_wise_mul(const tensor::Ptr& a, const tensor::Ptr& b) {
+        tensor::Ptr out = tensor::make(a->data.element_wise(b->data));
+        out->prev = {a, b};
+        out->op = "element_wise_mul";
+        out->_backward = [a, b, out]() {
+            a->grad += out->grad.element_wise(b->data);
+            b->grad += out->grad.element_wise(a->data);
+        };
+        return out;
+    }
+
+    inline tensor::Ptr sum_all(const tensor::Ptr& u) {
+        mat_f32 s(1, 1);
+        s(0, 0) = u->data.sum();
+        tensor::Ptr out = tensor::make(s);
+        out->prev = {u};
+        out->op = "sum_all";
+        out->_backward = [u, out]() {
+            float g = out->grad(0, 0);
+            auto shape = u->data.shape();
+            for (std::size_t i = 0; i < shape[0] * shape[1]; i++) {
+                u->grad.data_ptr()[i] += g;
+            }
+        };
+        return out;
+    }
+
+    inline tensor::Ptr scale(const tensor::Ptr& u, float s) {
+        tensor::Ptr out = tensor::make(u->data * (double)s);
+        out->prev = {u};
+        out->op = "scale";
+        out->_backward = [u, s, out]() {
+            u->grad += out->grad * (double)s;
+        };
+        return out;
+    }
+
+    inline tensor::Ptr broadcast_add(const tensor::Ptr& x, const tensor::Ptr& b) {
+        auto x_shape = x->data.shape();
+        auto b_shape = b->data.shape();
+
+        if (x_shape[0] != b_shape[0]) {
+            throw std::invalid_argument("Broadcast add shape mismatch: row dimensions must match.");
+        }
+
+        if (b_shape[1] == x_shape[1]) {
+            return x + b; // Normal addition
+        }
+
+        if (b_shape[1] != 1) {
+            throw std::invalid_argument("Broadcast add shape mismatch: bias must have 1 column for broadcasting.");
+        }
+
+        mat_f32 res_data(x_shape[0], x_shape[1]);
+        for (std::size_t i = 0; i < x_shape[0]; i++) {
+            for (std::size_t j = 0; j < x_shape[1]; j++) {
+                res_data(i, j) = x->data(i, j) + b->data(i, 0);
+            }
+        }
+
+        tensor::Ptr out = tensor::make(res_data);
+        out->prev = {x, b};
+        out->op = "broadcast_add";
+        out->_backward = [x, b, out]() {
+            x->grad += out->grad;
+            // Sum across batch dimension (columns)
+            mat_f32 b_grad_sum = out->grad.transpose().sum_rows().transpose();
+            b->grad += b_grad_sum;
+        };
+        return out;
+    }
+
     class Module {
         public:
             void zero_grad() {
@@ -57,7 +129,7 @@ namespace TensorLearn {
             }
 
             tensor::Ptr operator()(const tensor::Ptr& x) {
-                tensor::Ptr res = w*x + b;
+                tensor::Ptr res = broadcast_add(w*x, b);
                 if (use_relu) return relu(res);
                 return res;
             }
@@ -119,7 +191,9 @@ namespace TensorLearn {
 
     inline tensor::Ptr mse_loss(const tensor::Ptr& pred, const tensor::Ptr& target) {
         tensor::Ptr diff = pred - target;
-        return transpose(diff) * diff;
+        tensor::Ptr sq = element_wise_mul(diff, diff);
+        tensor::Ptr total_sum = sum_all(sq);
+        auto shape = pred->data.shape();
+        return scale(total_sum, 1.0f / (shape[0] * shape[1]));
     }
 }
-
