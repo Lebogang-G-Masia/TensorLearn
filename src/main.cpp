@@ -20,7 +20,7 @@ int main() {
     tensor::Ptr X = tensor::make(batch_x);
     tensor::Ptr Y = tensor::make(batch_y);
 
-    Layer hidden(2, 8, true);
+    Layer hidden(2, 8, Activation::ReLU);
     Layer output(8, 1);
 
     Network network({hidden, output});

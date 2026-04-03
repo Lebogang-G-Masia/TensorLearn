@@ -99,7 +99,38 @@ namespace TensorLearn {
         return out;
     }
 
+    inline tensor::Ptr sigmoid(const tensor::Ptr& u) {
+        auto sig_func = [](float x) -> float { return 1.0f / (1.0f + std::exp(-x)); };
+        tensor::Ptr out = tensor::make(u->data.map(sig_func));
+        out->prev = {u};
+        out->op = "sigmoid";
+        out->_backward = [u, out]() {
+            auto d_sig = [](float x) -> float { 
+                float s = 1.0f / (1.0f + std::exp(-x));
+                return s * (1.0f - s); 
+            };
+            u->grad += out->grad.element_wise(u->data.map(d_sig));
+        };
+        return out;
+    }
+
+    inline tensor::Ptr tanh(const tensor::Ptr& u) {
+        auto tanh_func = [](float x) -> float { return std::tanh(x); };
+        tensor::Ptr out = tensor::make(u->data.map(tanh_func));
+        out->prev = {u};
+        out->op = "tanh";
+        out->_backward = [u, out]() {
+            auto d_tanh = [](float x) -> float { 
+                float t = std::tanh(x);
+                return 1.0f - t * t; 
+            };
+            u->grad += out->grad.element_wise(u->data.map(d_tanh));
+        };
+        return out;
+    }
+
     class Module {
+
         public:
             void zero_grad() {
                 for (tensor::Ptr p : parameters()) {
@@ -112,16 +143,23 @@ namespace TensorLearn {
             virtual std::vector<tensor::Ptr> parameters() const { return {}; }
     };
 
+    enum class Activation {
+        None,
+        ReLU,
+        Sigmoid,
+        Tanh
+    };
+
     class Layer : public Module {
         public:
             tensor::Ptr w;
             tensor::Ptr b;
             std::size_t ins;
             std::size_t outs;
-            bool use_relu;
+            Activation activation;
 
-            Layer(std::size_t in_features, std::size_t out_features, bool relu_act = false) 
-                : ins(in_features), outs(out_features), use_relu(relu_act) {
+            Layer(std::size_t in_features, std::size_t out_features, Activation act = Activation::None) 
+                : ins(in_features), outs(out_features), activation(act) {
                 mat_f32 weights(out_features, in_features, true);
                 mat_f32 biases(out_features, 1);
                 w = tensor::make(weights);
@@ -130,8 +168,12 @@ namespace TensorLearn {
 
             tensor::Ptr operator()(const tensor::Ptr& x) {
                 tensor::Ptr res = broadcast_add(w*x, b);
-                if (use_relu) return relu(res);
-                return res;
+                switch(activation) {
+                    case Activation::ReLU: return relu(res);
+                    case Activation::Sigmoid: return sigmoid(res);
+                    case Activation::Tanh: return tanh(res);
+                    default: return res;
+                }
             }
 
             std::vector<tensor::Ptr> parameters() const override {
@@ -139,7 +181,6 @@ namespace TensorLearn {
                 return params;
             }
     };
-
     class Network : public Module {
         public:
             std::vector<Layer> layers {};
