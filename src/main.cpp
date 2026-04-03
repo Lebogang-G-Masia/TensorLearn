@@ -1,59 +1,61 @@
 #include <iostream>
 #include <vector>
-#include "network.h"
-#include <cmath>
+#include "../include/network.h"
 
 using namespace TensorLearn;
-using namespace UnitGrad;
-
-using ut_f32 = UnitTensor<float>;
 
 int main() {
-    nn model(2, {4, 1});
-
-    std::vector<std::vector<ut_f32::Ptr>> X = {
-        {ut_f32::make(0.0f), ut_f32::make(0.0f)},
-        {ut_f32::make(0.0f), ut_f32::make(1.0f)},
-        {ut_f32::make(1.0f), ut_f32::make(0.0f)},
-        {ut_f32::make(1.0f), ut_f32::make(1.0f)}
+    // 4 samples for OR gate
+    std::vector<tensor::Ptr> X = {
+        tensor::make(mat_f32({{0.0f}, {0.0f}})),
+        tensor::make(mat_f32({{0.0f}, {1.0f}})),
+        tensor::make(mat_f32({{1.0f}, {0.0f}})),
+        tensor::make(mat_f32({{1.0f}, {1.0f}}))
+    };
+    std::vector<tensor::Ptr> Y = {
+        tensor::make(mat_f32({{0.0f}})),
+        tensor::make(mat_f32({{1.0f}})),
+        tensor::make(mat_f32({{1.0f}})),
+        tensor::make(mat_f32({{1.0f}}))
     };
 
-    std::vector<ut_f32::Ptr> Y {
-        ut_f32::make(0.0f),
-        ut_f32::make(1.0f),
-        ut_f32::make(1.0f),
-        ut_f32::make(0.0f)
-    };
+    Layer hidden(2, 4, true); // 2 in, 4 out, relu=true
+    Layer output(4, 1);       // 4 in, 1 out
 
-    float learning_rate = 0.05f;
-    int epochs = 1000;
+    Network network({hidden, output});
+    SGD optimizer(0.01f);
 
-    std::cout << "Starting training loop..." << std::endl;
-
-    for (int epoch = 0; epoch < epochs; epoch++) {
-        ut_f32::Ptr total_loss = ut_f32::make(0.0f);
-        for (std::size_t i = 0; i < X.size(); i++) {
-            std::vector<ut_f32::Ptr> y_pred = model(X[i]);
-            ut_f32::Ptr diff = y_pred[0] - Y[i]; 
-            ut_f32::Ptr sq_diff = diff * diff;
+    std::size_t epochs = 1000;
+    for (std::size_t i = 0; i < epochs; i++) {
+        float epoch_loss = 0.0f;
+        for (std::size_t j = 0; j < X.size(); j++) {
+            // Forward
+            auto outputs = network({X[j]});
+            tensor::Ptr pred = outputs[0];
             
-            total_loss = total_loss + sq_diff;
+            // Loss
+            tensor::Ptr loss = mse_loss(pred, Y[j]);
+            epoch_loss += loss->data(0, 0);
+
+            // Backward
+            network.zero_grad();
+            backward(loss);
+
+            // Update
+            optimizer.step(network.parameters());
         }
-        model.zero_grad();
-        backward(total_loss);
-        for (ut_f32::Ptr p : model.parameters()) {
-            p->data = p->data - (learning_rate * p->grad);
-        }
-        if (epoch % 100 == 0 || epoch == epochs - 1) {
-            std::cout << "Epoch " << epoch << " | Loss: " << total_loss->data << "\n";
+        if (i % 100 == 0) {
+            std::cout << "Epoch " << i << " Loss: " << epoch_loss / X.size() << std::endl;
         }
     }
-    std::cout << "\nTraining complete!" << std::endl;
-    for (std::size_t i = 0; i < X.size(); i++) {
-        std::vector<ut_f32::Ptr> pred = model(X[i]);
-        std::cout << "Input: [" << X[i][0]->data << ", " << X[i][1]->data 
-                  << "] -> Prediction: " << std::round(pred[0]->data)
-                  << " (Target: " << Y[i]->data << ")\n";
+
+    // Test
+    std::cout << "\nTesting Trained Network:" << std::endl;
+    auto final_outputs = network(X);
+    for (std::size_t j = 0; j < X.size(); j++) {
+        std::cout << "Input: [" << X[j]->data(0,0) << ", " << X[j]->data(1,0) << "] "
+                  << "Pred: " << final_outputs[j]->data(0,0) << " "
+                  << "Target: " << Y[j]->data(0,0) << std::endl;
     }
 
     return 0;

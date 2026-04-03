@@ -95,7 +95,7 @@ namespace TensorLearn {
 
             std::vector<tensor::Ptr> parameters() const override {
                 std::vector<tensor::Ptr> params {};
-                for (Layer& layer : layers) {
+                for (const Layer& layer : layers) {
                     std::vector<tensor::Ptr> l_params = layer.parameters();
                     params.insert(params.end(), l_params.begin(), l_params.end());
                 }
