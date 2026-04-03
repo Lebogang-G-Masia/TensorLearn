@@ -2,67 +2,102 @@
 #include <vector>
 #include <iomanip>
 #include "../include/network.h"
+#include "../include/mnist_loader.h"
 
 using namespace TensorLearn;
 
-void run_serialization_test() {
-    std::cout << "=== TensorLearn Serialization Test ===" << std::endl;
+void train_mnist() {
+    std::cout << "=== TensorLearn MNIST Classification ===" << std::endl;
 
-    // XOR Data
-    mat_f32 batch_x({{0.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}});
-    mat_f32 batch_y({{0.0f, 1.0f, 1.0f, 0.0f}});
+    // Load MNIST (subset for speed but enough to see learning)
+    std::cout << "Loading MNIST..." << std::endl;
+    auto ds = MNIST::load("data/train-images-idx3-ubyte", "data/train-labels-idx1-ubyte", 5000);
+    auto test_ds = MNIST::load("data/t10k-images-idx3-ubyte", "data/t10k-labels-idx1-ubyte", 1000);
 
-    tensor::Ptr X = tensor::make(batch_x);
-    tensor::Ptr Y = tensor::make(batch_y);
-
-    Layer l1(2, 8, Activation::Tanh);
-    Layer l2(8, 1, Activation::None);
+    // Network: 784 -> 128 (ReLU) -> 10 (Sigmoid)
+    Layer l1(784, 128, Activation::ReLU);
+    Layer l2(128, 10, Activation::Sigmoid);
     Network network({l1, l2});
+    SGD optimizer(0.5f); // Increased learning rate
 
-    // 1. Train
-    std::cout << "Training model..." << std::endl;
-    SGD optimizer(0.1f);
-    for (std::size_t i = 0; i < 2000; i++) {
-        auto outputs = network({X});
-        backward(mse_loss(outputs[0], Y));
-        optimizer.step(network.parameters());
-        network.zero_grad();
+    int batch_size = 64;
+    int epochs = 20;
+
+    std::cout << "Starting training on " << ds.images.size() << " samples..." << std::endl;
+
+    for (int epoch = 0; epoch < epochs; epoch++) {
+        float epoch_loss = 0;
+        int correct = 0;
+
+        for (std::size_t i = 0; i < ds.images.size(); i += batch_size) {
+            int current_batch = std::min(batch_size, (int)(ds.images.size() - i));
+            
+            mat_f32 bx(784, current_batch);
+            mat_f32 by(10, current_batch);
+
+            for (int b = 0; b < current_batch; b++) {
+                for (int f = 0; f < 784; f++) bx(f, b) = ds.images[i + b][f];
+                for (int c = 0; c < 10; c++) by(c, b) = (ds.labels[i + b] == c) ? 1.0f : 0.0f;
+            }
+
+            tensor::Ptr X = tensor::make(bx);
+            tensor::Ptr Y = tensor::make(by);
+
+            auto outputs = network({X});
+            tensor::Ptr pred = outputs[0];
+            tensor::Ptr loss = mse_loss(pred, Y);
+
+            network.zero_grad();
+            backward(loss);
+            optimizer.step(network.parameters());
+
+            epoch_loss += loss->data(0, 0);
+            
+            for (int b = 0; b < current_batch; b++) {
+                int max_idx = 0;
+                float max_val = -1.0f;
+                for (int c = 0; c < 10; c++) {
+                    if (pred->data(c, b) > max_val) {
+                        max_val = pred->data(c, b);
+                        max_idx = c;
+                    }
+                }
+                if (max_idx == ds.labels[i + b]) correct++;
+            }
+        }
+        std::cout << "Epoch " << std::setw(2) << epoch << " | Loss: " << std::fixed << std::setprecision(6) << epoch_loss / (ds.images.size() / batch_size)
+                  << " | Accuracy: " << (float)correct / ds.images.size() * 100 << "%" << std::endl;
     }
 
-    auto pred_before = network({X})[0]->data;
-    std::cout << "Loss before saving: " << mse_loss(network({X})[0], Y)->data(0,0) << std::endl;
+    std::cout << "\nSaving trained model to 'mnist_model.bin'..." << std::endl;
+    network.save("mnist_model.bin");
 
-    // 2. Save
-    std::cout << "Saving model to 'xor_model.bin'..." << std::endl;
-    network.save("xor_model.bin");
+    // Evaluation
+    std::cout << "Evaluating on test set..." << std::endl;
+    int test_correct = 0;
+    for (std::size_t i = 0; i < test_ds.images.size(); i++) {
+        mat_f32 tx(784, 1);
+        for (int f = 0; f < 784; f++) tx(f, 0) = test_ds.images[i][f];
+        
+        auto outputs = network({tensor::make(tx)});
+        auto pred = outputs[0];
 
-    // 3. Create a fresh network and Load
-    std::cout << "Loading model into a fresh network..." << std::endl;
-    Layer l1_new(2, 8, Activation::Tanh);
-    Layer l2_new(8, 1, Activation::None);
-    Network fresh_network({l1_new, l2_new});
-
-    fresh_network.load("xor_model.bin");
-
-    // 4. Verify
-    auto pred_after = fresh_network({X})[0]->data;
-    std::cout << "Loss after loading: " << mse_loss(fresh_network({X})[0], Y)->data(0,0) << std::endl;
-
-    bool match = true;
-    for(std::size_t i=0; i<4; i++) {
-        if (std::abs(pred_before(0, i) - pred_after(0, i)) > 1e-6) match = false;
+        int max_idx = 0;
+        float max_val = -1.0f;
+        for (int c = 0; c < 10; c++) {
+            if (pred->data(c, 0) > max_val) {
+                max_val = pred->data(c, 0);
+                max_idx = c;
+            }
+        }
+        if (max_idx == test_ds.labels[i]) test_correct++;
     }
-
-    if (match) {
-        std::cout << "\nSERIALIZATION TEST PASSED: Loaded weights produce identical results." << std::endl;
-    } else {
-        std::cout << "\nSERIALIZATION TEST FAILED: Results mismatch after loading." << std::endl;
-    }
+    std::cout << "Test Accuracy: " << (float)test_correct / test_ds.images.size() * 100 << "%" << std::endl;
 }
 
 int main() {
     try {
-        run_serialization_test();
+        train_mnist();
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
         return 1;
