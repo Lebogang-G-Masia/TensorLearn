@@ -1,24 +1,28 @@
-#include <vector>
-#include <random>
 #include <stdexcept>
-#include "include/matrix.hpp"
+#include <vector>
+#include <initializer_list>
 #include "engine/unit.h"
+#include "include/matrix.hpp"
 
-using namespace UnitGrad;
-using namespace Lingebra;
+using mat_f32 = Lingebra::Matrix<float>;
 
-using mat_f32 = Matrix<float>; 
-using tensor = UnitTensor<mat_f32>;
+// Overload operator* for Lingebra::Matrix to support matrix multiplication via matmul
+namespace Lingebra {
+    template <typename F>
+    Matrix<F> operator*(const Matrix<F>& l, const Matrix<F>& r) {
+        return l.matmul(r);
+    }
+}
 
+using tensor = UnitGrad::UnitTensor<mat_f32>;
 
 namespace TensorLearn {
     class Module {
         public:
-            virtual ~Module() = default;
             void zero_grad() {
-                for (tensor::Ptr p : parameters()) {
-                    std::size_t total_elements = p->grad.shape()[0] * p->grad.shape()[1];
-                    for (std::size_t i = 0; i < total_elements; i++)
+                for (tensor::Ptr p: parameters()) {
+                    std::size_t total = p->grad.shape()[1] * p->grad.shape()[0];
+                    for (std::size_t i = 0; i < total; i++)
                         p->grad.data_ptr()[i] = 0.0f;
                 }
             }
@@ -30,62 +34,58 @@ namespace TensorLearn {
         public:
             tensor::Ptr w;
             tensor::Ptr b;
-            bool nonLinear;
-
-            Layer (std::size_t in_features, std::size_t out_features, bool nonLinear_=true) : nonLinear(nonLinear_) {
-                static std::random_device rd;
-                static std::mt19937 gen(rd());
-                std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-
-                mat_f32 weights(in_features, out_features);
-                mat_f32 bias(1, out_features);
-
-                for (std::size_t i = 0; i < in_features; i++)
-                    for (std::size_t j = 0; j < out_features; j++)
-                        weights(i, j) = dist(gen);
-
+            std::size_t ins;
+            std::size_t outs;
+    
+            Layer(std::size_t in_features, std::size_t out_features) : ins(in_features), outs(out_features) {
+                mat_f32 weights(out_features, in_features, true);
+                mat_f32 biases(out_features, 1);
                 w = tensor::make(weights);
-                b = tensor::make(bias);
+                b = tensor::make(biases);
             }
-
+    
             tensor::Ptr operator()(const tensor::Ptr& x) {
-                tensor::Ptr out = tensor::make(x->data.matmul(w->data) + b->data);
-                return nonLinear ? relu(out) : out;
+                return w*x + b;
             }
 
             std::vector<tensor::Ptr> parameters() const override {
-                return {w, b};
+                std::vector<tensor::Ptr> params { w, b };
+                return params;
             }
     };
 
-    class nn : public Module {
+    class Network : public Module {
         public:
             std::vector<Layer> layers {};
-
-            nn (std::size_t in_features, const std::vector<std::size_t>& out_features) {
-                std::vector<std::size_t> sizes = {in_features};
-                sizes.insert(sizes.end(), out_features.begin(), out_features.end());
-
-                for (std::size_t i = 0; i < out_features.size(); i++) {
-                    bool last = (i == out_features.size() - 1);
-                    layers.push_back(Layer(sizes[i], sizes[i+1], !last));
+            Network(std::initializer_list<Layer> seq) {
+                for (std::size_t i = 0; i < seq.size(); i++) {
+                    if (i != 0) {
+                        std::size_t last_out = (std::data(seq) + i - 1)->outs;
+                        if ((std::data(seq) + i)->ins != last_out) throw std::invalid_argument("Layer mismatch");
+                    }
+                    layers.push_back(*(std::data(seq) + i));
                 }
             }
-
-            tensor::Ptr operator()(tensor::Ptr x) {
-                for (std::size_t i = 0; i < layers.size(); i++)
-                    x = layers[i](x);
-                return x;
+            
+            std::vector<tensor::Ptr> operator()(const std::vector<tensor::Ptr>& X) {
+                std::vector<tensor::Ptr> output {};
+                for (tensor::Ptr x : X) {
+                    tensor::Ptr out = x;
+                    for (Layer& layer : layers) {
+                        out = layer(out);
+                    }
+                    output.push_back(out);
+                }
+                return output;
             }
 
             std::vector<tensor::Ptr> parameters() const override {
                 std::vector<tensor::Ptr> params {};
-                for (std::size_t i = 0; i < layers.size(); i++) {
-                    std::vector<tensor::Ptr> l_params = layers[i].parameters();
+                for (Layer layer : layers) {
+                    std::vector<tensor::Ptr> l_params = layer.parameters();
                     params.insert(params.end(), l_params.begin(), l_params.end());
                 }
                 return params;
             }
     };
-
 }
