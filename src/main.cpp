@@ -5,8 +5,8 @@
 
 using namespace TensorLearn;
 
-void run_stress_test() {
-    std::cout << "=== TensorLearn Deep Stress Test (XOR with Mixed Activations) ===" << std::endl;
+void run_serialization_test() {
+    std::cout << "=== TensorLearn Serialization Test ===" << std::endl;
 
     // XOR Data
     mat_f32 batch_x({{0.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}});
@@ -15,64 +15,56 @@ void run_stress_test() {
     tensor::Ptr X = tensor::make(batch_x);
     tensor::Ptr Y = tensor::make(batch_y);
 
-    // Deep Network: 2 -> 8 (Tanh) -> 4 (ReLU) -> 1 (None/Linear)
     Layer l1(2, 8, Activation::Tanh);
-    Layer l2(8, 4, Activation::ReLU);
-    Layer l3(4, 1, Activation::None);
+    Layer l2(8, 1, Activation::None);
+    Network network({l1, l2});
 
-    Network network({l1, l2, l3});
+    // 1. Train
+    std::cout << "Training model..." << std::endl;
     SGD optimizer(0.1f);
-
-    std::size_t epochs = 3000;
-    for (std::size_t i = 0; i < epochs; i++) {
+    for (std::size_t i = 0; i < 2000; i++) {
         auto outputs = network({X});
-        tensor::Ptr pred = outputs[0];
-        tensor::Ptr loss = mse_loss(pred, Y);
-
-        network.zero_grad();
-        backward(loss);
+        backward(mse_loss(outputs[0], Y));
         optimizer.step(network.parameters());
-
-        if (i % 500 == 0) {
-            std::cout << "Epoch " << std::setw(4) << i << " | Loss: " << std::fixed << std::setprecision(8) << loss->data(0, 0) << std::endl;
-        }
+        network.zero_grad();
     }
 
-    std::cout << "\nFinal Results:" << std::endl;
-    auto final_outputs = network({X});
-    tensor::Ptr final_pred = final_outputs[0];
-    
-    bool all_passed = true;
-    for (std::size_t j = 0; j < 4; j++) {
-        float val = final_pred->data(0, j);
-        int pred_bin = val > 0.5f ? 1 : 0;
-        int target_bin = Y->data(0, j) > 0.5f ? 1 : 0;
-        
-        std::cout << "Input: [" << X->data(0, j) << ", " << X->data(1, j) << "] "
-                  << "Raw: " << std::setw(10) << val 
-                  << " | Pred: " << pred_bin 
-                  << " | Target: " << target_bin;
-        
-        if (pred_bin == target_bin) {
-            std::cout << " [PASS]" << std::endl;
-        } else {
-            std::cout << " [FAIL]" << std::endl;
-            all_passed = false;
-        }
+    auto pred_before = network({X})[0]->data;
+    std::cout << "Loss before saving: " << mse_loss(network({X})[0], Y)->data(0,0) << std::endl;
+
+    // 2. Save
+    std::cout << "Saving model to 'xor_model.bin'..." << std::endl;
+    network.save("xor_model.bin");
+
+    // 3. Create a fresh network and Load
+    std::cout << "Loading model into a fresh network..." << std::endl;
+    Layer l1_new(2, 8, Activation::Tanh);
+    Layer l2_new(8, 1, Activation::None);
+    Network fresh_network({l1_new, l2_new});
+
+    fresh_network.load("xor_model.bin");
+
+    // 4. Verify
+    auto pred_after = fresh_network({X})[0]->data;
+    std::cout << "Loss after loading: " << mse_loss(fresh_network({X})[0], Y)->data(0,0) << std::endl;
+
+    bool match = true;
+    for(std::size_t i=0; i<4; i++) {
+        if (std::abs(pred_before(0, i) - pred_after(0, i)) > 1e-6) match = false;
     }
 
-    if (all_passed) {
-        std::cout << "\nSTRESS TEST PASSED: Network converged with mixed activations." << std::endl;
+    if (match) {
+        std::cout << "\nSERIALIZATION TEST PASSED: Loaded weights produce identical results." << std::endl;
     } else {
-        std::cout << "\nSTRESS TEST FAILED: Network failed to converge." << std::endl;
+        std::cout << "\nSERIALIZATION TEST FAILED: Results mismatch after loading." << std::endl;
     }
 }
 
 int main() {
     try {
-        run_stress_test();
+        run_serialization_test();
     } catch (const std::exception& e) {
-        std::cerr << "Runtime Error: " << e.what() << std::endl;
+        std::cerr << "Error: " << e.what() << std::endl;
         return 1;
     }
     return 0;

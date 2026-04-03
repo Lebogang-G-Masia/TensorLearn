@@ -1,6 +1,7 @@
 #include <stdexcept>
 #include <vector>
 #include <initializer_list>
+#include <fstream>
 #include "engine/unit.h"
 #include "include/matrix.hpp"
 
@@ -130,7 +131,6 @@ namespace TensorLearn {
     }
 
     class Module {
-
         public:
             void zero_grad() {
                 for (tensor::Ptr p : parameters()) {
@@ -141,7 +141,55 @@ namespace TensorLearn {
             }
 
             virtual std::vector<tensor::Ptr> parameters() const { return {}; }
+
+            void save(const std::string& filename) const {
+                std::ofstream ofs(filename, std::ios::binary);
+                if (!ofs.is_open()) throw std::runtime_error("Could not open file for saving: " + filename);
+
+                auto params = parameters();
+                std::size_t num_params = params.size();
+                ofs.write(reinterpret_cast<const char*>(&num_params), sizeof(num_params));
+
+                for (const auto& p : params) {
+                    auto shape = p->data.shape();
+                    std::size_t r = shape[0];
+                    std::size_t c = shape[1];
+                    ofs.write(reinterpret_cast<const char*>(&r), sizeof(r));
+                    ofs.write(reinterpret_cast<const char*>(&c), sizeof(c));
+                    ofs.write(reinterpret_cast<const char*>(p->data.data_ptr()), r * c * sizeof(float));
+                }
+                ofs.close();
+            }
+
+            void load(const std::string& filename) {
+                std::ifstream ifs(filename, std::ios::binary);
+                if (!ifs.is_open()) throw std::runtime_error("Could not open file for loading: " + filename);
+
+                std::size_t num_params;
+                ifs.read(reinterpret_cast<char*>(&num_params), sizeof(num_params));
+
+                auto params = parameters();
+                if (num_params != params.size()) {
+                    throw std::runtime_error("Parameter count mismatch: file contains " + std::to_string(num_params) + 
+                                             ", but module expects " + std::to_string(params.size()));
+                }
+
+                for (auto& p : params) {
+                    std::size_t r, c;
+                    ifs.read(reinterpret_cast<char*>(&r), sizeof(r));
+                    ifs.read(reinterpret_cast<char*>(&c), sizeof(c));
+
+                    auto shape = p->data.shape();
+                    if (r != shape[0] || c != shape[1]) {
+                        throw std::runtime_error("Parameter dimension mismatch for one of the tensors.");
+                    }
+
+                    ifs.read(reinterpret_cast<char*>(p->data.data_ptr()), r * c * sizeof(float));
+                }
+                ifs.close();
+            }
     };
+
 
     enum class Activation {
         None,
